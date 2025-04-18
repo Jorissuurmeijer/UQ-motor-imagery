@@ -1,26 +1,41 @@
-import pickle as pkl
-import warnings
-
 import matplotlib
-import numpy as np
 import pandas as pd
-from keras_uncertainty.utils import entropy
+from keras import backend as K
+from keras import Model, utils, activations, optimizers
+from keras import callbacks
+
+
+
+#
+# from keras._tf_keras.keras.models import Model
+# from keras._tf_keras.keras import utils
+# from keras._tf_keras.keras.callbacks import EarlyStopping
+# from sklearn.utils.extmath import softmax
+# # from keras.optimizers import Adam
+
 from matplotlib import pyplot as plt
 from moabb.datasets import BNCI2014_001, BNCI2014_002, Zhou2016, BNCI2014_004
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from sklearn.utils.extmath import softmax
-from tensorflow.python.keras import utils
-from tensorflow.python.keras.callbacks import EarlyStopping
-from tqdm import tqdm
+from keras_uncertainty.utils import entropy
 
-from project.models.shallowConvNet.DUQ.SCN_model_DUQ import ShallowConvNet
+import pickle as pkl
+
+# from keras._tf_keras.keras.utils import to_categorical
+
 from project.utils import calibration
 from project.utils.calibration import plot_calibration_curve
+from project.utils.load_data import load_data
+from project.models.shallowConvNet.standard.standard_SCN_model import ShallowConvNet
 from project.utils.evaluate_and_plot import plot_confusion_and_evaluate, evaluate_uncertainty, plot_calibration, \
     brier_score
-from project.utils.load_data import load_data
+
+from tqdm import tqdm
+import numpy as np
+
+import warnings
+
 from project.utils.uncertainty_utils import find_best_temperature
 
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -28,7 +43,9 @@ warnings.filterwarnings('ignore', category=UserWarning)
 
 
 def main():
-    early_stopping = EarlyStopping(
+    temperature_scaling = False #TODO fout eruit halen
+
+    early_stopping = callbacks.EarlyStopping(
         monitor='val_loss',
         patience=20,  # Number of epochs with no improvement
         mode='min',  # Minimize validation loss
@@ -37,7 +54,7 @@ def main():
 
     dataset1 = BNCI2014_002()
     dataset2 = Zhou2016()
-    dataset3 = BNCI2014_004()
+    dataset3 = BNCI2014_004()       # the bad performing one, if done again, take in range, 3,4
     dataset4 = BNCI2014_001()  # original one
 
     datasets = [dataset1, dataset2, dataset3, dataset4]
@@ -47,8 +64,10 @@ def main():
     # This unfortunately cannot really be done more elegantly, because the paradigm to get the data needs
     #   the number of classes, and the dataset nor the dict of get_data can get the number of classes
 
-    channels = [15, 14, 3, 22]        # the same holds here
+    channels = [15, 14, 3, 22]  # the same holds here
     samples_data = [2561, 1251, 1126, 1001]
+
+    num_models = 1
 
     all_predictions = []
     all_test_labels = []
@@ -57,12 +76,11 @@ def main():
         all_predictions.append([])
         all_test_labels.append([])
 
-        for subject_id in tqdm(range(1, num_subjects + 1)):       # loop to take data and train model per subject
+        for subject_id in range(1, num_subjects + 1):
             dataset_id = datasets.index(dataset) + 1
 
-            X, y, _ = load_data(dataset, subject_id, num_class)
-            assert not np.isnan(X).any(), "Data contains NaN values"
-           
+            X, y, metadata = load_data(dataset, subject_id, num_class)
+
             unique_labels = np.unique(y)
             num_unique_labels = len(unique_labels)
             assert num_unique_labels == num_class, "The number of labels does not match the expected number of classes."
@@ -70,42 +88,53 @@ def main():
             X_reshaped = X.reshape(X.shape[0], X.shape[1], X.shape[2], 1)
 
             label_encoder = LabelEncoder()
-            y_integers = label_encoder.fit_transform(y)
-            y_categorical = utils.to_categorical(y_integers, num_classes=num_unique_labels)
+            y = label_encoder.fit_transform(y)
+            y = utils.to_categorical(y, num_classes=num_unique_labels)
 
-            X_train, X_test, y_train, y_test = train_test_split(X_reshaped, y_categorical, test_size=0.2, random_state=42)
-            assert not np.isnan(X_train).any(), "Training data contains NaN values"
-            assert not np.isnan(X_test).any(), "Test data contains NaN values"
+            X_train, X_test, y_train, y_test = train_test_split(X_reshaped, y, test_size=0.2, random_state=42)
 
-            net = ShallowConvNet()
-            model = net.build(nb_classes=num_class, Chans=chans, Samples=samples, dropoutRate=0.5)
+            predictions = np.zeros((num_models, X_test.shape[0], num_class))
+            train_predictions = np.zeros((num_models, X_train.shape[0], num_class))
+            for model_idx in tqdm(range(num_models)):
 
-            # weights = compute_sample_weight('balanced', y=y_train)  # can be used when wanting to use balanced weights
-            model.fit(
-                X_train,
-                y_train,
-                callbacks=[early_stopping],
-                epochs=200,  # Should be 200 for proper run
-                batch_size=64, validation_split=0.1,   # sample_weight=weights,
-                verbose=0,
-            )
-            model.save(f'./saved_trained_models/SCN/PerSubject/subject{subject_id}')  # use to save the model
+                model = ShallowConvNet(nb_classes=num_class, Chans=chans, Samples=samples, dropoutRate=0.5)
+                optimizer = optimizers.Adam(learning_rate=0.001)  # standard 0.001
+                model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
 
-            predictions_test = model.predict(X_test)
-            assert not np.isnan(predictions_test).any(), "Model predictions contain NaN values"
+                # weights = compute_sample_weight('balanced', y=y_train)    # can be used for balanced weights
+                model.fit(
+                    X_train,
+                    y_train,
+                    callbacks=[early_stopping],
+                    epochs=100,  # Should be 100
+                    batch_size=64, validation_split=0.1,   # sample_weighTt=weights,
+                    verbose=0,
+                )
 
-            predicted_classes = np.argmax(predictions_test, axis=1)
-            assert not np.isnan(predicted_classes).any(), "Model predicted classes contain NaN values"
+                if temperature_scaling:
+                    assert model.layers[0].input is not None and len(model.layers[0].input) is not 0
+                    logits_layer_model = Model(inputs=model.layers[0].input, outputs=model.layers[-2].output)
+                    predictions[model_idx] = logits_layer_model.predict(X_test).squeeze()
+                    train_predictions[model_idx] = logits_layer_model.predict(X_train).squeeze()
+                else:
+                    predictions[model_idx] = model.predict(X_test)
 
-            # Calculate probabilities with a softmax using a temperature to determine the confidence of the model
-            distances_train = model.predict(X_train) ** 2
-            temperature = find_best_temperature(distances_train.argmax(axis=1), y_train.argmax(axis=1), distances_train)
+            mean_predictions = np.mean(np.array([predictions]), axis=0).squeeze()
 
-            distances_test = predictions_test ** 2
-            prediction_proba = softmax(distances_test / temperature)
+            if temperature_scaling:
+                mean_train_logits = np.mean(np.array([train_predictions]), axis=0).squeeze()
 
-            entr = entropy(y_test, prediction_proba)        # not used for now
-            print("Entropy: ", entr)
+                y_class_train = mean_train_logits.argmax(axis=1)
+                temperature = find_best_temperature(y_class_train, y_train.argmax(axis=1), mean_train_logits)
+
+                prediction_proba = activations.softmax(mean_predictions / temperature)
+            else:
+                prediction_proba = mean_predictions
+            predicted_classes = np.argmax(mean_predictions, axis=1)
+            # confidence = np.max(max_pred_0, axis=1)
+
+            # entr = entropy(y_test, prediction_proba)       # not further used for now
+            # print("Entropy: ", entr)
             y_test = y_test.argmax(axis=1)
 
             all_predictions[dataset_id - 1].append(prediction_proba)
@@ -177,26 +206,26 @@ def main():
                                                          subject_id="", dataset_id=dataset_id+1, save=True))
 
     results = pd.DataFrame(results)
-    results.to_csv("./results/DUQ_results.csv", index=False)
+    results.to_csv("./results/CNN-T_results.csv", index=False)
 
     print(results)
     print(results.mean())
 
     matplotlib.rc_file_defaults()
 
-    pkl.dump(calibration_curves, open("./results/Riemann_MDRM-calibration_curves.pkl", "wb"))
+    pkl.dump(calibration_curves, open("./results/CNN-T-calibration_curves.pkl", "wb"))
 
     plt.plot([0, 1], [0, 1], color='black', alpha=0.5, linestyle='dashed', label='_nolegend_')
     for x, y in calibration_curves:
         plt.plot(x, y, alpha=0.8, linewidth=3)
-    plt.xlabel("Confidence", fontsize=18)
-    plt.ylabel("Accuracy", fontsize=18)
+    plt.xlabel("Confidence", fontsize=16)
+    plt.ylabel("Accuracy", fontsize=16)
     plt.legend(["Steryl", "Zhou", "BCIC4-2b", "BCIC4-2a"], fontsize=14)
-    plt.xticks(fontsize=16)
-    plt.yticks(fontsize=16)
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
 
-    plt.savefig(f"./graphs/calibration_plots/DUQ.pdf", bbox_inches='tight')
-    pkl.dump(calibration_curves, open("./results/DUQ-calibration_curves.pkl", "wb"))
+    plt.savefig(f"./graphs/calibration_plots/CNN-T.pdf")
+    pkl.dump(calibration_curves, open("./results/CNN-T-calibration_curves.pkl", "wb"))
 
     plt.clf()
 

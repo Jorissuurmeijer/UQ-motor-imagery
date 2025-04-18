@@ -1,20 +1,18 @@
 import matplotlib
 import pandas as pd
-from keras import Model
-from keras.callbacks import EarlyStopping
 from sklearn.utils.extmath import softmax
-# from keras.optimizers import Adam
-from tensorflow.keras.optimizers.legacy import Adam
+from keras import optimizers, callbacks, utils, Model
 
 from matplotlib import pyplot as plt
 from moabb.datasets import BNCI2014_001, BNCI2014_002, Zhou2016, BNCI2014_004
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from tensorflow.keras import utils
 from keras_uncertainty.utils import entropy
 
 import pickle as pkl
+
+from tensorflow.python.keras.utils.np_utils import to_categorical
 
 from project.utils import calibration
 from project.utils.calibration import plot_calibration_curve
@@ -37,7 +35,7 @@ warnings.filterwarnings('ignore', category=UserWarning)
 def main():
     temperature_scaling = True
 
-    early_stopping = EarlyStopping(
+    early_stopping = callbacks.EarlyStopping(
         monitor='val_loss',
         patience=20,  # Number of epochs with no improvement
         mode='min',  # Minimize validation loss
@@ -81,7 +79,7 @@ def main():
 
             label_encoder = LabelEncoder()
             y = label_encoder.fit_transform(y)
-            y = utils.to_categorical(y, num_classes=num_unique_labels)
+            y = to_categorical(y, num_classes=num_unique_labels)
 
             X_train, X_test, y_train, y_test = train_test_split(X_reshaped, y, test_size=0.2, random_state=42)
 
@@ -90,7 +88,7 @@ def main():
             for model_idx in tqdm(range(num_models)):
 
                 model = ShallowConvNet(nb_classes=num_class, Chans=chans, Samples=samples, dropoutRate=0.5)
-                optimizer = Adam(learning_rate=0.001)  # standard 0.001
+                optimizer = optimizers.Adam(learning_rate=0.001)  # standard 0.001
                 model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
 
                 # weights = compute_sample_weight('balanced', y=y_train)    # can be used for balanced weights

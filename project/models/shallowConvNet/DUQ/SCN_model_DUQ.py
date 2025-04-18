@@ -1,23 +1,26 @@
 import keras
-from keras.layers import Dense, Activation, Dropout
-from keras.layers import Conv2D, AveragePooling2D
-from keras.layers import BatchNormalization
-# from keras.optimizers import Adam
-from tensorflow.keras.optimizers.legacy import Adam
-from keras.layers import Flatten
-from keras.constraints import max_norm
-import tensorflow.keras.backend as K
+# from keras.src.layers import BatchNormalization
+# from tensorflow.python.keras.layers import Dense, Activation, Dropout
+# from tensorflow.python.keras.layers import Conv2D, AveragePooling2D
+# # from tensorflow.python.keras.layers import BatchNormalization
+# # from keras.optimizers import Adam
+# # from tensorflow.python.keras.optimizers import Adam
+# from tensorflow.python.keras.layers import Flatten
+# from tensorflow.python.keras.constraints import max_norm
+# import tensorflow.python.keras.backend as K
 
+# from tensorflow.python.keras.optimizer_v2.adam import Adam
+# from tensorflow.python.keras.regularizers import l2
 from keras_uncertainty.layers import RBFClassifier
-from keras.regularizers import l2
-
+from keras import layers, optimizers, constraints, regularizers
+import tensorflow.python.keras.backend as K
 
 # Based on code by Dr. Matias Valdenegro Toro: https://github.com/mvaldenegro/keras-uncertainty
 def add_l2_regularization(model, l2_strength=1e-4):
     for layer in model.layers:
         if layer.trainable_weights:
             # Wrap the regularization inside a lambda to ensure it's callable
-            layer_loss = lambda: l2(l2_strength)(layer.trainable_weights[0])
+            layer_loss = lambda: regularizers.l2(l2_strength)(layer.trainable_weights[0])
             model.add_loss(layer_loss)
     # for layer in model.layers:
     #     for tw in layer.trainable_weights:
@@ -62,29 +65,29 @@ class ShallowConvNet:
     def build(self, nb_classes, Chans=22, Samples=1001, dropoutRate=0.5):
         model = keras.models.Sequential()
 
-        model.add(Conv2D(40, (1, 25),  # sampling rate in used datasets is around 250,
+        model.add(layers.Conv2D(40, (1, 25),  # sampling rate in used datasets is around 250,
                          # so take the values of the original paper
                          input_shape=(Chans, Samples, 1),
-                         kernel_constraint=max_norm(2., axis=(0, 1, 2)),
+                         kernel_constraint=constraints.max_norm(2., axis=(0, 1, 2)),
                          ))
-        model.add(Conv2D(40, (Chans, 1), use_bias=False,
-                         kernel_constraint=max_norm(2., axis=(0, 1, 2))
+        model.add(layers.Conv2D(40, (Chans, 1), use_bias=False,
+                         kernel_constraint=constraints.max_norm(2., axis=(0, 1, 2))
                          ))
 
-        model.add(BatchNormalization(epsilon=1e-05, momentum=0.9))
-        model.add(Activation(square))
+        model.add(layers.BatchNormalization(epsilon=1e-05, momentum=0.9))
+        model.add(layers.Activation(square))
 
-        model.add(AveragePooling2D(pool_size=(1, 75), strides=(1, 15)))
-        model.add(Activation(log))
+        model.add(layers.AveragePooling2D(pool_size=(1, 75), strides=(1, 15)))
+        model.add(layers.Activation(log))
 
-        model.add(Dropout(dropoutRate))
+        model.add(layers.Dropout(dropoutRate))
 
-        model.add(Flatten())
-        model.add(Dense(nb_classes, kernel_constraint=max_norm(0.5)))
+        model.add(layers.Flatten())
+        model.add(layers.Dense(nb_classes, kernel_constraint=constraints.max_norm(0.5)))
 
         model.add(RBFClassifier(nb_classes, length_scale=0.2))
 
-        optimizer = Adam(learning_rate=0.01)  # standard 0.001
+        optimizer = optimizers.Adam(learning_rate=0.01)  # standard 0.001
 
         model.compile(loss="binary_crossentropy",
                       optimizer=optimizer, metrics=["categorical_accuracy"])

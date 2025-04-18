@@ -5,7 +5,7 @@ results
 
 project/preprocessing/Oudated
 
-project/Utils/extract_average_results.py
+project/utils/extract_average_results.py
 project/models/shallowConvNet/hyperparamtuning
 project/preprocessing
 
@@ -15,8 +15,8 @@ project/models/Riemann/MDRM_per_dataset.py
 project/models/shallowConvNet/DUQ/DUQ_per_dataset.py
 project/models/shallowConvNet/Deep_ensembles/DE_per_dataset.py
 
-project/Utils/all_data
-project/Utils/per_dataset
+project/utils/all_data
+project/utils/per_dataset
 
 
 # Byte-compiled / optimized / DLL files
