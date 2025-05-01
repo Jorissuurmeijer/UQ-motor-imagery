@@ -20,6 +20,7 @@ from project.utils.calibration import plot_calibration_curve
 from project.utils.evaluate_and_plot import evaluate_uncertainty, plot_confusion_and_evaluate, plot_calibration, \
     brier_score
 from project.utils.load_data import load_data
+from project.utils.rejection_coverage import accuracy_coverage_curve, get_uncertainty
 from project.utils.uncertainty_utils import find_best_temperature
 
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -74,9 +75,14 @@ def main():
         num_subjects = len(dataset.subject_list)
         all_predictions.append([])
         all_test_labels.append([])
-        for subject_id in range(1, num_subjects + 1):
-            dataset_id = datasets.index(dataset) + 1
 
+        ds_all_preds = []
+        ds_all_labels = []
+        ds_all_uncert = []  
+
+        dataset_id = datasets.index(dataset) + 1
+
+        for subject_id in range(1, num_subjects + 1):
             X, y, metadata = load_data(dataset, subject_id, num_class)
             label_encoder = LabelEncoder()
             y = label_encoder.fit_transform(y)
@@ -107,6 +113,12 @@ def main():
             else:
                 prediction_proba = model.predict_proba(X_test)
 
+            # y_test = y_test.argmax(axis=1)
+
+            ds_all_preds.append(prediction_proba)
+            ds_all_labels.append(y_test)
+            ds_all_uncert.append(get_uncertainty(prediction_proba, mode="uncertainty"))
+
             all_predictions[dataset_id - 1].append(prediction_proba)
             all_test_labels[dataset_id - 1].append(y_test)
 
@@ -119,6 +131,24 @@ def main():
 
             plot_calibration(y_pred, y_test, prediction_proba,
                              subject_id=subject_id, dataset_id=dataset_id, save=True)
+
+        preds_cat = np.concatenate(ds_all_preds, axis=0)
+        labels_cat = np.concatenate(ds_all_labels, axis=0)
+        uncert_cat = np.concatenate(ds_all_uncert, axis=0)
+
+        cov_ds, risk_ds, _ = accuracy_coverage_curve(labels_cat, preds_cat, uncert_cat, n_steps=50)
+
+        # save figures (one per dataset for now)
+        plt.figure(figsize=(5, 4))
+        plt.plot(cov_ds, risk_ds, lw=2)
+        plt.gca()  # .invert_xaxis()
+        plt.ylim(0.0, 1.05)
+        plt.xlabel("Coverage", fontsize=12)
+        plt.ylabel("Accuracy", fontsize=12)
+        plt.title(f"Dataset {dataset_id}: Coverage-Accuracy plot", fontsize=13)
+        plt.tight_layout()
+        plt.savefig(f"./graphs/risk_coverage/dataset{dataset_id}.png", dpi=150)
+        plt.close()
 
     plt.style.use('classic')
     results = {
