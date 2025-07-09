@@ -1,11 +1,13 @@
 import keras
+import time
 from keras.layers import Dense, Activation, Dropout
 from keras.layers import Conv2D, AveragePooling2D
 from keras.layers import BatchNormalization
-from keras.optimizers import Adam
+# from keras.optimizers import Adam
+from tensorflow.keras.optimizers.legacy import Adam
 from keras.layers import Flatten
 from keras.constraints import max_norm
-from keras import backend as K
+import tensorflow.keras.backend as K
 
 from keras_uncertainty.layers import RBFClassifier
 from keras.regularizers import l2
@@ -18,6 +20,10 @@ def add_l2_regularization(model, l2_strength=1e-4):
             # Wrap the regularization inside a lambda to ensure it's callable
             layer_loss = lambda: l2(l2_strength)(layer.trainable_weights[0])
             model.add_loss(layer_loss)
+    # for layer in model.layers:
+    #     for tw in layer.trainable_weights:
+    #         model.add_loss(l2(l2_strength)(tw))
+
 
 
 def square(x):

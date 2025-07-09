@@ -1,21 +1,22 @@
+import pickle as pkl
 import warnings
 
 import matplotlib
 import numpy as np
 import pandas as pd
-import seaborn as sns
-import pickle as pkl
-import time
 from matplotlib import pyplot as plt
+from mne.decoding import CSP
 from moabb.datasets import BNCI2014_001, Zhou2016, BNCI2014_004, BNCI2014_002
 from pyriemann.estimation import Covariances
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder
-from sklearn.utils import compute_sample_weight
 from sklearn.utils.extmath import softmax
+import time
 
-from project.models.Riemann.MDRM_model import MDM
+
 from project.utils import calibration
 from project.utils.calibration import plot_calibration_curve
 from project.utils.evaluate_and_plot import evaluate_uncertainty, plot_confusion_and_evaluate, plot_calibration, \
@@ -24,35 +25,6 @@ from project.utils.load_data import load_data
 from project.utils.uncertainty_utils import find_best_temperature
 
 warnings.filterwarnings('ignore', category=FutureWarning)
-
-
-def plot_covariance_matrices(mdm, num_classes):
-    """
-    Plots the covariance matrices for all classes.
-
-    Parameters:
-    mdm : object
-        The MDM object that contains the fitted covariance matrices.
-    epochs : object
-        The epochs object that contains the channel names.
-    num_classes : int
-        The number of classes to plot the covariance matrices for.
-    """
-    fig, axes = plt.subplots(1, num_classes, figsize=(4 * num_classes, 4))
-
-    if num_classes == 1:
-        axes = [axes]
-
-    for i in range(num_classes):
-        df = pd.DataFrame(data=mdm.covmeans_[i])
-        ax = axes[i]
-        g = sns.heatmap(df, ax=ax, square=True, cbar=False, xticklabels=2, yticklabels=2)
-        g.set_title(f'Mean covariance - class {i + 1}')
-        ax.set_xticklabels(ax.get_xticklabels(), rotation='vertical')
-        ax.set_yticklabels(ax.get_yticklabels(), rotation='horizontal')
-
-    plt.tight_layout()
-    plt.show()
 
 
 def main():
@@ -74,7 +46,6 @@ def main():
     train_times = []
     inference_times = []
     inference_counts = []
-
     for dataset, num_class in zip(datasets, n_classes):
         num_subjects = len(dataset.subject_list)
         all_predictions.append([])
@@ -85,39 +56,31 @@ def main():
             X, y, metadata = load_data(dataset, subject_id, num_class)
             label_encoder = LabelEncoder()
             y = label_encoder.fit_transform(y)
-            cov_estimator = Covariances(estimator='lwf')
-            X_cov = cov_estimator.fit_transform(X)
 
-            X_train, X_test, y_train, y_test = train_test_split(X_cov, y, test_size=0.2, random_state=42)
-            weights = compute_sample_weight('balanced', y=y_train)
-
-            model = MDM(metric=dict(mean='riemann', distance='riemann'))
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            model = make_pipeline(CSP(n_components=8), LDA())
 
             start_time = time.time()
-            model.fit(X_train, y_train, sample_weight=weights)
+            model.fit(X_train, y_train)
             train_times.append(time.time() - start_time)
 
-            # plot_covariance_matrices(model, num_class)
-
             # Predict the labels for the test set
+            start_time = time.time()
+            y_pred = model.predict(X_test)
+            inference_times.append(time.time() - start_time)
+            inference_counts.append(y_pred.shape[0])
 
             # Determine the confidence of the model
-            y_pred = model.predict(X_test)
             if temperature_scaling:
                 y_pred_train = model.predict(X_train)
                 distances_train = -model.transform(X_train) ** 2
                 temperature = find_best_temperature(y_pred_train, y_train, distances_train)
 
-                start_time = time.time()
                 distance_pred = model.transform(X_test)
                 distances = -distance_pred ** 2
                 prediction_proba = softmax(distances / temperature)
             else:
-                start_time = time.time()
                 prediction_proba = model.predict_proba(X_test)
-
-            inference_times.append(time.time() - start_time)
-            inference_counts.append(y_pred.shape[0])
 
             all_predictions[dataset_id - 1].append(prediction_proba)
             all_test_labels[dataset_id - 1].append(y_test)
@@ -143,6 +106,10 @@ def main():
         "Accuracy": [],
         "Accuracy_std": [],
     }
+
+    print(f"Average train time: {np.mean(train_times)}")
+    print(f"Average inference time: {np.mean(np.array(inference_times) / np.array(inference_counts))} per sample")
+
     calibration_curves = []
     for dataset_id, (dataset_predictions, dataset_labels) in enumerate(zip(all_predictions, all_test_labels)):
         brier_scores = []
@@ -188,20 +155,17 @@ def main():
                                                          np.array(all_confidences),
                                                          subject_id="", dataset_id=dataset_id+1, save=True))
 
-    print(f"Average train time: {np.mean(train_times)}")
-    print(f"Average inference time: {np.mean(np.array(inference_times) / np.array(inference_counts))} per sample")
-
     results = pd.DataFrame(results)
     if temperature_scaling:
-        results.to_csv("./results/Riemann_MDRM-T_results.csv", index=False)
+        results.to_csv("./results/CSPLDA-T_results.csv", index=False)
     else:
-        results.to_csv("./results/Riemann_MDRM_results.csv", index=False)
+        results.to_csv("./results/CSPLDA_results.csv", index=False)
     print(results)
     print(results.mean())
 
     matplotlib.rc_file_defaults()
 
-    pkl.dump(calibration_curves, open("./results/Riemann_MDRM-calibration_curves.pkl", "wb"))
+    pkl.dump(calibration_curves, open("./results/CSPLDA-calibration_curves.pkl", "wb"))
 
     plt.plot([0, 1], [0, 1], color='black', alpha=0.5, linestyle='dashed', label='_nolegend_')
     for x, y in calibration_curves:
@@ -213,12 +177,12 @@ def main():
     plt.yticks(fontsize=16)
 
     if temperature_scaling:
-        plt.savefig(f"./graphs/calibration_plots/MDRM-T.pdf", bbox_inches='tight')
-        pkl.dump(calibration_curves, open("./results/MDRM-T-calibration_curves.pkl", "wb"))
+        plt.savefig(f"./graphs/calibration_plots/CSPLDA-T.pdf", bbox_inches='tight')
+        pkl.dump(calibration_curves, open("./results/CSPLDA-T-calibration_curves.pkl", "wb"))
 
     else:
-        plt.savefig(f"./graphs/calibration_plots/MDRM.pdf", bbox_inches='tight')
-        pkl.dump(calibration_curves, open("./results/MDRM-calibration_curves.pkl", "wb"))
+        plt.savefig(f"./graphs/calibration_plots/CSPLDA.pdf",bbox_inches='tight')
+        pkl.dump(calibration_curves, open("./results/CSPLDA-calibration_curves.pkl", "wb"))
 
     plt.clf()
 

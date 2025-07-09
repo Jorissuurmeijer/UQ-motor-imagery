@@ -2,7 +2,7 @@ from matplotlib import pyplot as plt
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 from sklearn.preprocessing import LabelEncoder
 
-from project.Utils import calibration
+from project.utils import calibration
 
 import seaborn as sns
 import numpy as np
@@ -81,6 +81,7 @@ def evaluate_uncertainty(y_predictions, y_test, confidences, subject_id, dataset
     ece = calibration.get_ece(y_predictions, y_test, prediction_confidences)
     mce = calibration.get_mce(y_predictions, y_test, prediction_confidences)
     nce = calibration.get_nce(y_predictions, y_test, prediction_confidences)
+    print(ece)
 
     if save:
         f = open(f"./results/dataset{dataset_id}/evaluation_subject{subject_id}.txt", "a")
@@ -95,7 +96,6 @@ def evaluate_uncertainty(y_predictions, y_test, confidences, subject_id, dataset
         print(f"ECE {subject_id}: {ece}\n")
         print(f"MCE {subject_id}: {mce}\n")
         print(f"NCE {subject_id}: {nce}\n")
-
 
 def plot_calibration(y_predictions, y_test, confidences, subject_id, dataset_id, save=True):
     prediction_confidences = np.max(confidences, axis=1)

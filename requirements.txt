@@ -1,10 +1,9 @@
 joblib>=1.3.2
 keras>=2.11.0
 keras_tuner>=1.4.6
-Keras_Uncertainty>=0.0.1
 matplotlib>=3.8.4
 mne>=1.6.1
-moabb>=1.0.0
+moabb
 numpy>=1.26.4
 packaging>=21.3
 pandas>=1.5.3
@@ -14,5 +13,4 @@ scikit_learn>=1.3.2
 scipy>=1.13.1
 seaborn>=0.13.2
 tensorflow>=2.11.0
-tensorflow_intel>=2.11.0
 tqdm>=4.66.2
